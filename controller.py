@@ -80,11 +80,11 @@ def controller(
     )
 
     # Speed model
-    v_max = 47.0      # top speed on straights
+    v_max = 45.0      # top speed on straights
     k_speed = 15.0    # slows the car in turns
 
     v_r = v_max / (1 + k_speed * curvature)
-    v_r = np.clip(v_r, 20.0, v_max)
+    v_r = np.clip(v_r, 12.0, v_max)
 
     return np.array([delta_r, v_r])
 
