@@ -8,8 +8,8 @@ from racetrack import RaceTrack
 # HIGH-LEVEL CONTROLLER: Computes desired steering + speed
 #   - pure pursuit
 #   - curvature-based speed
-#   - sudden-curvature slowdown
-#   - NEW: curvature-dependent lookahead
+#   - sudden-curvature slowdown (speed-dependent lookahead)
+#   - curvature-dependent lookahead
 # ============================================================
 
 def controller(
@@ -57,13 +57,11 @@ def controller(
     # --------------------------------------------------------
     # 3. PURE PURSUIT with CURVATURE-DEPENDENT LOOKAHEAD
     # --------------------------------------------------------
-    # idea:
     #   - in tight corners (high curvature) → shorter lookahead
     #   - on straights / after turns (low curvature) → longer lookahead
     lookahead_min = 12.0   # meters, for sharp turns
     lookahead_max = 35.0   # meters, on straights
 
-    # scale curvature into [0, 1] for blending
     # curv_scale is a "typical sharp turn" curvature; tune as needed
     curv_scale = 0.15
     c_norm = np.clip(curvature_now / curv_scale, 0.0, 1.0)
@@ -108,24 +106,40 @@ def controller(
     # 6. Curvature-based speed planning (current point)
     # --------------------------------------------------------
     v_max = 105.0      # top speed on straights
-    k_speed = 15.0    # slows the car in turns
+    k_speed = 15.0     # slows the car in turns
 
     v_r = v_max / (1 + k_speed * curvature_now)
 
     # --------------------------------------------------------
     # 7. Detect sudden curvature ahead and slow down hard
+    #    with SPEED-DEPENDENT LOOKAHEAD DISTANCE
     # --------------------------------------------------------
-    hazard_steps_ahead = 30           # how many indices ahead to inspect
     curvature_jump_factor = 1.8       # how much larger than current to be "sudden"
     curvature_abs_threshold = 0.08    # minimum absolute curvature for a "real" corner
     hard_slowdown_factor = 0.45       # how aggressively to slow
 
+    # main tuning knobs for hazard horizon
+    hazard_min = 25.0   # m lookahead at very low speed
+    hazard_max = 150.0  # m lookahead at top speed (or near it)
+
+    # scale current speed into [0, 1] using v_max
+    v_ratio = np.clip(v / v_max, 0.0, 1.0)
+    hazard_lookahead_dist = hazard_min + (hazard_max - hazard_min) * v_ratio
+
     max_curv_ahead = curvature_now
+    dist_acc_hazard = 0.0
     idx_scan = idx
 
-    for _ in range(hazard_steps_ahead):
+    # walk along centerline forward until we reach hazard_lookahead_dist
+    while dist_acc_hazard < hazard_lookahead_dist:
+        p1 = centerline[idx_scan % N]
+        p2 = centerline[(idx_scan + 1) % N]
+        seg_len = np.linalg.norm(p2 - p1)
+        dist_acc_hazard += seg_len
+
         idx_scan = (idx_scan + 1) % N
         kappa = curvature_at(idx_scan)
+
         if kappa > max_curv_ahead:
             max_curv_ahead = kappa
 
