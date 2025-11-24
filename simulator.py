@@ -128,7 +128,7 @@ class Simulator:
             self.lap_time_elapsed = time() - self.lap_start_time
 
     def start(self):
-        # Run the simulation loop every 1 second.
+        # Run the simulation loop every 1 millisecond.
         self.timer = self.figure.canvas.new_timer(interval=1)
         self.timer.add_callback(self.run)
         self.lap_start_time = time()
