@@ -123,6 +123,7 @@ class Simulator:
         if progress <= 10.0 and self.lap_started and not self.lap_finished:
             self.lap_finished = True
             print(self.lap_time_elapsed)
+            print(self.track_limit_violations)
             self.lap_time_elapsed = time() - self.lap_start_time
 
         if not self.lap_finished and self.lap_start_time is not None:
