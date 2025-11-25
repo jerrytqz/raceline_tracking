@@ -131,6 +131,7 @@ def controller(
     v_max = 110.0      # top speed on straights
     k_speed = 8     # slows the car in turns
 
+
     # use the worst curvature in the upcoming window, not just local
     v_r = v_max / (1 + k_speed * curvature_eff)
 
