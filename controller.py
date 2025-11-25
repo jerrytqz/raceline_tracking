@@ -82,11 +82,15 @@ def controller(
     Ld_speed = L0 + k_v * v
     Ld_speed = np.clip(Ld_speed, 3.0, 40.0)
 
-    k_curv = 4.0      # curvature influence strength
-    curv_factor = 1.0 / (1.0 + k_curv * curvature_eff)
+    # PURE PURSUIT lookahead based only on speed
+    L0 = 5.0          # slightly larger base
+    k_v = 0.7
 
-    lookahead_dist = Ld_speed * curv_factor
-    lookahead_dist = np.clip(lookahead_dist, 3.0, 40.0)
+    Ld_speed = L0 + k_v * v
+
+    # Don't let lookahead go below, say, 8 m
+    lookahead_dist = np.clip(Ld_speed, 8.0, 40.0)
+
 
     # walk along centerline until we've gone lookahead_dist
     dist_acc = 0.0
