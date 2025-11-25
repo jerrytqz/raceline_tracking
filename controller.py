@@ -128,8 +128,8 @@ def controller(
     # 6. Curvature-based speed planning
     #    **also using curvature_eff**
     # --------------------------------------------------------
-    v_max = 100.0      # top speed on straights
-    k_speed = 10.0     # slows the car in turns
+    v_max = 110.0      # top speed on straights
+    k_speed = 8     # slows the car in turns
 
     # use the worst curvature in the upcoming window, not just local
     v_r = v_max / (1 + k_speed * curvature_eff)
