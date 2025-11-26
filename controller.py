@@ -111,7 +111,7 @@ def controller(
     # At low speed, we don't need to look very far;
     # at high speed, look much farther so we slow early for big corners
     window_min = 60.0    # m
-    window_max = 240.0   # m
+    window_max = 250.0   # m
     speed_window_dist = window_min + (window_max - window_min) * v_ratio
 
     curvature_eff = max_curvature_ahead(idx, speed_window_dist)
