@@ -11,11 +11,10 @@ def controller(
     """
     High-level controller:
     - Pure pursuit for steering.
-    - Curvature-based speed planning using a speed-dependent
-      arc-length window ahead.
+    - Curvature-based speed planning using a speed-dependent arc-length window ahead.
     """
 
-    # Unpack the car state
+    # Set up and unpack variables
     x, y, delta, v, phi = state
     wheelbase = parameters[0]
 
@@ -24,24 +23,17 @@ def controller(
 
     car_pos = np.array([x, y])
 
-    # --------------------------------------------------------
-    # 1. Find the closest point on the track
-    # --------------------------------------------------------
     dists = np.linalg.norm(centerline - car_pos, axis=1)
     idx = np.argmin(dists)
 
-    # ========================================================
-    # A) STEERING: PURE PURSUIT
-    # ========================================================
+    # STEERING -------------------------------------------------------------------------------------
 
-    # SPEED-DEPENDENT LOOKAHEAD
-    L0 = 5.0      # base lookahead [m]
-    k_v = 0.7     # lookahead growth with speed
+    L0 = 5.0 # base lookahead
+    k_v = 0.7 # lookahead growth with speed
 
     Ld_speed = L0 + k_v * v
     lookahead_dist = np.clip(Ld_speed, 8.0, 40.0)
 
-    # Walk along centerline until we've gone lookahead_dist
     dist_acc = 0.0
     idx2 = idx
     while dist_acc < lookahead_dist:
@@ -52,22 +44,18 @@ def controller(
 
     target = centerline[idx2 % N]
 
-    # Desired heading to target
     dx = target[0] - x
     dy = target[1] - y
 
     phi_desired = np.arctan2(dy, dx)
     alpha = phi_desired - phi
-    alpha = np.arctan2(np.sin(alpha), np.cos(alpha))  # wrap to [-pi, pi]
+    alpha = np.arctan2(np.sin(alpha), np.cos(alpha))
 
-    # Pure Pursuit steering
     delta_r = np.arctan2(2 * wheelbase * np.sin(alpha), lookahead_dist)
 
-    # ========================================================
-    # B) SPEED: CURVATURE-BASED PLANNING
-    # ========================================================
+    # VELOCITY -------------------------------------------------------------------------------------
 
-    # Helper: local curvature at a given centerline index
+    # Local curvature at a given centerline index
     def curvature_at(idx_local: int) -> float:
         i_prev = (idx_local - 2) % N
         i_curr = idx_local % N
@@ -83,7 +71,7 @@ def controller(
         denom = np.linalg.norm(v1) * np.linalg.norm(v2) + 1e-9
         return float(np.abs(np.cross(v1, v2)) / denom)
 
-    # Helper: max curvature in a window of arc length ahead
+    # Max curvature in a window of arc length ahead
     def max_curvature_ahead(start_idx: int, window_dist: float) -> float:
         dist_acc = 0.0
         idx_scan = start_idx
@@ -102,28 +90,26 @@ def controller(
 
         return curv_max
 
-    # Curvature now and effective curvature ahead
     curvature_now = curvature_at(idx)
 
     v_max = 100.0
     v_ratio = np.clip(v / v_max, 0.0, 1.0)
 
-    # At low speed, we don't need to look very far;
+    # Idea is that at low speed, we don't need to look very far but
     # at high speed, look much farther so we slow early for big corners
-    window_min = 60.0    # m
-    window_max = 250.0   # m
+    window_min = 60.0
+    window_max = 250.0
     speed_window_dist = window_min + (window_max - window_min) * v_ratio
 
     curvature_eff = max_curvature_ahead(idx, speed_window_dist)
 
-    # Curvature-based speed planning
-    k_speed = 8.0   # slows the car in turns
+    k_speed = 8.0
     v_r = v_max / (1 + k_speed * curvature_eff)
 
-    # FINAL SPEED CLAMP with curvature-dependent min speed
-    v_min_base = 8.0       # m/s ~ 29 km/h
+    # Clamp speed with curvature-dependent min speed
+    v_min_base = 8.0
     sharp_curv_threshold = 0.25
-    v_min_sharp = 4.0      # m/s ~ 14 km/h
+    v_min_sharp = 4.0
 
     if curvature_now > sharp_curv_threshold:
         v_min = v_min_sharp
@@ -134,16 +120,15 @@ def controller(
 
     return np.array([delta_r, v_r])
 
-# ============================================================
-# LOW-LEVEL CONTROLLER: Converts desired steering/speed → inputs
-#   (unchanged)
-# ============================================================
-
 def lower_controller(
     state: ArrayLike,
     desired: ArrayLike,
     parameters: ArrayLike
 ) -> ArrayLike:
+    """
+    Low-level controller:
+    - Simple proportional controllers for steering rate and acceleration.
+    """
     delta, v = state[2], state[3]
     delta_r, v_r = desired
 
