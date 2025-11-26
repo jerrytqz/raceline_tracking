@@ -4,10 +4,6 @@ from numpy.typing import ArrayLike
 from racetrack import RaceTrack
 
 
-# ============================================================
-# HIGH-LEVEL CONTROLLER: Computes desired steering + speed
-# ============================================================
-
 def controller(
     state: ArrayLike,
     parameters: ArrayLike,
@@ -21,16 +17,82 @@ def controller(
     centerline = racetrack.centerline
     N = centerline.shape[0]
 
+    car_pos = np.array([x, y])
+
     # --------------------------------------------------------
     # 1. Find the closest point on the track
     # --------------------------------------------------------
-    dists = np.linalg.norm(centerline - np.array([x, y]), axis=1)
+    dists = np.linalg.norm(centerline - car_pos, axis=1)
     idx = np.argmin(dists)
 
     # --------------------------------------------------------
-    # 2. Pure Pursuit lookahead — stable and simple
+    # Helper: local curvature at a given centerline index
     # --------------------------------------------------------
-    lookahead_dist = 20.0   # meters
+    def curvature_at(idx_local: int) -> float:
+        i_prev = (idx_local - 2) % N
+        i_curr = idx_local % N
+        i_next = (idx_local + 2) % N
+
+        p_prev = centerline[i_prev]
+        p_curr = centerline[i_curr]
+        p_next = centerline[i_next]
+
+        v1 = p_curr - p_prev
+        v2 = p_next - p_curr
+
+        denom = np.linalg.norm(v1) * np.linalg.norm(v2) + 1e-9
+        return float(np.abs(np.cross(v1, v2)) / denom)
+
+    # --------------------------------------------------------
+    # 2. Compute current curvature at closest point
+    # --------------------------------------------------------
+    curvature_now = curvature_at(idx)
+
+    # --------------------------------------------------------
+    # 2b. Peak curvature in a short window ahead
+    #     (captures "sharp + short straight + opposite" complexes)
+    # --------------------------------------------------------
+    peak_window_dist = 60.0   # meters of track to scan ahead (tune 40–80)
+    dist_acc_peak = 0.0
+    idx_scan = idx
+    curvature_peak = curvature_now
+
+    while dist_acc_peak < peak_window_dist:
+        p1 = centerline[idx_scan % N]
+        p2 = centerline[(idx_scan + 1) % N]
+        seg_len = np.linalg.norm(p2 - p1)
+        dist_acc_peak += seg_len
+
+        idx_scan = (idx_scan + 1) % N
+        kappa = curvature_at(idx_scan)
+        if kappa > curvature_peak:
+            curvature_peak = kappa
+
+    # effective curvature used for planning:
+    # use the worst curvature in the next ~60m so we respect the whole complex
+    curvature_eff = curvature_peak
+
+    # --------------------------------------------------------
+    # 3. PURE PURSUIT with SPEED- and CURVATURE-DEPENDENT LOOKAHEAD
+    #    using curvature_eff (not just curvature_now)
+    # --------------------------------------------------------
+    L0 = 3.0          # base lookahead [m] at v = 0
+    k_v = 0.6         # how much lookahead grows with speed [s]
+
+    Ld_speed = L0 + k_v * v
+    Ld_speed = np.clip(Ld_speed, 3.0, 40.0)
+
+    # PURE PURSUIT lookahead based only on speed
+    L0 = 5.0          # slightly larger base
+    k_v = 0.7
+
+    Ld_speed = L0 + k_v * v
+
+    # Don't let lookahead go below, say, 8 m
+    lookahead_dist = np.clip(Ld_speed, 8.0, 40.0)
+
+
+    # walk along centerline until we've gone lookahead_dist
     dist_acc = 0.0
     idx2 = idx
 
@@ -43,7 +105,7 @@ def controller(
     target = centerline[idx2 % N]
 
     # --------------------------------------------------------
-    # 3. Determine desired heading to target
+    # 4. Determine desired heading to target
     # --------------------------------------------------------
     dx = target[0] - x
     dy = target[1] - y
@@ -55,7 +117,7 @@ def controller(
     alpha = np.arctan2(np.sin(alpha), np.cos(alpha))
 
     # --------------------------------------------------------
-    # 4. Pure Pursuit steering formula
+    # 5. Pure Pursuit steering formula
     # --------------------------------------------------------
     delta_r = np.arctan2(2 * wheelbase * np.sin(alpha), lookahead_dist)
 
@@ -63,34 +125,75 @@ def controller(
     delta_r = np.clip(delta_r, -parameters[4], parameters[4])
 
     # --------------------------------------------------------
-    # 5. Curvature-based speed planning
+    # 6. Curvature-based speed planning
+    #    **also using curvature_eff**
     # --------------------------------------------------------
-    idx_prev = (idx - 2) % N
-    idx_next = (idx + 2) % N
+    v_max = 110.0      # top speed on straights
+    k_speed = 8     # slows the car in turns
 
-    p_prev = centerline[idx_prev]
-    p_curr = centerline[idx]
-    p_next = centerline[idx_next]
 
-    v1 = p_curr - p_prev
-    v2 = p_next - p_curr
+    # use the worst curvature in the upcoming window, not just local
+    v_r = v_max / (1 + k_speed * curvature_eff)
 
-    curvature = np.abs(
-        np.cross(v1, v2) / (np.linalg.norm(v1) * np.linalg.norm(v2) + 1e-9)
-    )
+    # --------------------------------------------------------
+    # 7. Detect sudden curvature further ahead and slow down hard
+    #    with SPEED-DEPENDENT LOOKAHEAD DISTANCE
+    #    (kept as an additional safety net)
+    # --------------------------------------------------------
+    curvature_jump_factor = 2.2       # how much larger than current to be "sudden"
+    curvature_abs_threshold = 0.10    # minimum absolute curvature for a "real" corner
+    hard_slowdown_factor = 0.8        # how aggressively to slow
 
-    # Speed model
-    v_max = 45.0      # top speed on straights
-    k_speed = 15.0    # slows the car in turns
+    hazard_min = 25.0   # m lookahead at very low speed
+    hazard_max = 250.0  # m lookahead at top speed (or near it)
 
-    v_r = v_max / (1 + k_speed * curvature)
-    v_r = np.clip(v_r, 12.0, v_max)
+    v_ratio = np.clip(v / v_max, 0.0, 1.0)
+    hazard_lookahead_dist = hazard_min + (hazard_max - hazard_min) * v_ratio
+
+    max_curv_ahead = curvature_eff      # start from curvature_eff now
+    dist_acc_hazard = 0.0
+    idx_scan = idx
+
+    while dist_acc_hazard < hazard_lookahead_dist:
+        p1 = centerline[idx_scan % N]
+        p2 = centerline[(idx_scan + 1) % N]
+        seg_len = np.linalg.norm(p2 - p1)
+        dist_acc_hazard += seg_len
+
+        idx_scan = (idx_scan + 1) % N
+        kappa = curvature_at(idx_scan)
+
+        if kappa > max_curv_ahead:
+            max_curv_ahead = kappa
+
+    if (
+        max_curv_ahead > curvature_abs_threshold
+        and max_curv_ahead > curvature_jump_factor * curvature_eff
+    ):
+        v_corner = v_max / (1 + k_speed * max_curv_ahead)
+        v_hazard = v_corner * hard_slowdown_factor
+        v_r = min(v_r, v_hazard)
+
+    # --------------------------------------------------------
+    # 8. FINAL CLAMP with CURVATURE-DEPENDENT MIN SPEED
+    # --------------------------------------------------------
+    v_min_base = 8.0       # m/s ~ 29 km/h
+    sharp_curv_threshold = 0.25
+    v_min_sharp = 4.0      # m/s ~ 14 km/h
+
+    if curvature_now > sharp_curv_threshold:
+        v_min = v_min_sharp
+    else:
+        v_min = v_min_base
+
+    v_r = np.clip(v_r, v_min, v_max)
 
     return np.array([delta_r, v_r])
 
 
 # ============================================================
 # LOW-LEVEL CONTROLLER: Converts desired steering/speed → inputs
+#   (unchanged)
 # ============================================================
 
 def lower_controller(
