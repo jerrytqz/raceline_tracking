@@ -92,31 +92,20 @@ def controller(
 
     curvature_now = curvature_at(idx)
 
-    v_max = 100.0
+    v_max = 160.0
     v_ratio = np.clip(v / v_max, 0.0, 1.0)
 
     # Idea is that at low speed, we don't need to look very far but
     # at high speed, look much farther so we slow early for big corners
     window_min = 60.0
-    window_max = 250.0
+    window_max = 360.0
     speed_window_dist = window_min + (window_max - window_min) * v_ratio
 
     curvature_eff = max_curvature_ahead(idx, speed_window_dist)
 
-    k_speed = 8.0
-    v_r = v_max / (1 + k_speed * curvature_eff)
-
-    # Clamp speed with curvature-dependent min speed
-    v_min_base = 8.0
-    sharp_curv_threshold = 0.25
-    v_min_sharp = 4.0
-
-    if curvature_now > sharp_curv_threshold:
-        v_min = v_min_sharp
-    else:
-        v_min = v_min_base
-
-    v_r = np.clip(v_r, v_min, v_max)
+    v_min = 5.0
+    k_speed = 15.0
+    v_r = v_min + (v_max - v_min) / (1.0 + k_speed * curvature_eff ** 1.4)
 
     return np.array([delta_r, v_r])
 
