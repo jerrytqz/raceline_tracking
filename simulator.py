@@ -116,7 +116,7 @@ class Simulator:
 
     def update_status(self):
         progress = np.linalg.norm(self.car.state[0:2] - self.rt.centerline[0, 0:2], 2)
-        print("progress:", progress)
+        # print("progress:", progress)
 
         if progress > 10.0 and not self.lap_started:
             self.lap_started = True
