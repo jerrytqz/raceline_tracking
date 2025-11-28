@@ -1,7 +1,7 @@
 import numpy as np
 from numpy.typing import ArrayLike
 
-from racetrack import RaceTrack
+from simulator import RaceTrack
 
 def controller(
     state: ArrayLike,
@@ -89,8 +89,6 @@ def controller(
                 curv_max = kappa
 
         return curv_max
-
-    curvature_now = curvature_at(idx)
 
     v_max = 160.0
     v_ratio = np.clip(v / v_max, 0.0, 1.0)
